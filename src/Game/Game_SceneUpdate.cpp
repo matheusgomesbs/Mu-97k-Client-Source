@@ -203,9 +203,28 @@ int Net_SendBuf(const char* buf, int len)
 // DecSerial and validates a monotonic 0,1,2,… sequence via CheckSerial
 // (SerialCheck.cpp:23).  Any mismatch → CloseClient in HackPacketCheck.cpp.
 // Do the stomp here so every caller gets it for free.
+// Trazado temporal de envíos (diagnóstico de la desconexión al atacar, 2026-08-17).
+// Poner en 0 para sacarlo. No forma parte del port.
+#define NET_SEND_TRACE 0
+#if NET_SEND_TRACE
+static void NetSendTrace(const char* tag, const BYTE* pkt, int totalLen)
+{
+    char line[256];
+    int n = wsprintfA(line, "SEND %s len=%d op=%02X :", tag, totalLen,
+                      (totalLen > 2) ? pkt[2] : 0);
+    for (int i = 0; i < totalLen && i < 24; i++)
+        n += wsprintfA(line + n, " %02X", pkt[i]);
+    DbgLogPublic(line);
+}
+#else
+#define NetSendTrace(tag, pkt, len) ((void)0)
+#endif
+
 void Net_SendSmallPacket(const BYTE* pkt, int totalLen)
 {
     char buf[0x402];
+
+    NetSendTrace("C3", pkt, totalLen);
 
     // ── LoginKey chain XOR (CFB) — UNIVERSAL para TODOS los paquetes C3 ───
     // El companion (Mu-linux-97K Source/Client/Main/Protocol.cpp:983) llama
@@ -263,6 +282,8 @@ void Net_SendC1Packet(const BYTE* pkt, int totalLen)
 {
     if (!pkt || totalLen <= 0 || totalLen > 0x400) return;
 
+    NetSendTrace("C1", pkt, totalLen);
+
     BYTE buf[0x402];
     memcpy(buf, pkt, totalLen);
     for (int i = 3; i < totalLen; i++) {
@@ -279,6 +300,8 @@ void Net_SendC1Packet(const BYTE* pkt, int totalLen)
 void Net_SendLargePacket(const BYTE* pkt, int totalLen)
 {
     char buf[0x802];
+
+    NetSendTrace("C4", pkt, totalLen);
 
     // Chain XOR universal — ver Net_SendSmallPacket arriba para detalles.
     // Mismo formato de input (pkt[0]=C1 placeholder, pkt[1]=size, pkt[2]=head,

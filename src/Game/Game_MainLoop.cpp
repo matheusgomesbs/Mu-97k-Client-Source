@@ -47,7 +47,13 @@
 // (_rand ya está definido como `_rand() rand()` en stdafx.h)
 
 extern "C" { void DbgLogPublic(const char* msg); void ChkHeapPublic(const char* tag); }
+
+#define ML_HEAP_CHECK 0
+#if ML_HEAP_CHECK
 #define CHK(tag) ChkHeapPublic(tag)
+#else
+#define CHK(tag) ((void)0)
+#endif
 
 void __cdecl Game_MainLoop(HDC param_1)
 {
