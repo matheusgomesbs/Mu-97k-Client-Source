@@ -411,8 +411,14 @@ void  __cdecl FUN_00480e00(int, int, int);
 void  __cdecl FUN_00481ba0(char* ID, char* Text, DWORD entity, int Flag, int SetColor); // CreateChat
 void  __cdecl FUN_004821a0(void);
 int   __cdecl FUN_00482be0(int category);  // GetItemSlot — returns inventory slot index or -1
-void  __cdecl FUN_00483780(int, int, int);
-void  __cdecl FUN_00483b30(int entity, int slot, int flags);       // Item_Equip
+// UseSkillWithRangeCheck(c, c, pItem, iSkill) — acerca por pathfinding si el objetivo
+// está fuera del alcance del skill, y si no lanza UseSkillWarrior. Llamada sólo desde
+// FUN_00483b30. El call site empuja 4 args y limpia con `ADD ESP,0x10`.
+bool  __cdecl FUN_00483780(DWORD c, DWORD c2, DWORD pItem, int iSkill);
+// SkillWarrior(CHARACTER *c, ITEM *pItem) — contraparte DK de SkillElf @ 0x0048BD70,
+// mismo prototipo. Único llamador: Attack @ 0x0049CBF0. Antes estaba rotulada como
+// "Item_Equip", que era incorrecto (ver src/Item/Item_Equip.cpp).
+bool  __cdecl FUN_00483b30(DWORD c, DWORD pItem);
 
 // ── UI / HUD ──────────────────────────────────────────────────────────────────
 uint  __cdecl FUN_004977f0(char* src, void* key, char flags);  // String_CompareKey (returns non-zero if match)
