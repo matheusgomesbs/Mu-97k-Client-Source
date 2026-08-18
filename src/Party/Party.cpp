@@ -21,8 +21,8 @@
 // ── TERRAIN TILE UPDATE (opcode 0x46, FUN_00436d60) ──────────────────────────
 //
 //   byte[3] == 0x00 → Rectangle tile update:
-//     if g_GameSubState in [10..16] and byte[4]==8:
-//       FUN_004fa5c0(g_GameSubState, 0x24, 0, 1)  — map zone transition
+//     if World in [11..16] and byte[4]==8:
+//       FUN_004fa5c0(World, 0x24, 0, 1)  — map zone transition
 //     Loop byte[6] count, stride 4 from byte[8]:
 //       byte[-1] = x1, byte[0] = y1, byte[1] = x2, byte[2] = y2
 //       FUN_004f6f30(x1, y1, x2-x1+1, y2-y1+1, byte[4], !(byte[5]))
@@ -217,6 +217,13 @@ void Terrain_TileUpdate(BYTE* pkt)
     if (pkt[3] == 0x00)
     {
         // Rectangle update
+        // 0x00436DCB  MOV EAX, [0x0055A7AC]        ; World (indice de mapa)
+        // 0x00436DD0  CMP EAX,0xB  / JL  0x00436DEF
+        // 0x00436DD5  CMP EAX,0x10 / JG  0x00436DEF
+        // 0x00436DDA  CMP byte ptr [EDI+0x4],0x8 / JNZ 0x00436DEF
+        // Rango real = [11, 16].  El `> 10 && < 0x11` de abajo es equivalente y esta
+        // correcto; lo que estaba mal era el comentario de la cabecera ([10..16]).
+        // Verificado 2026-08-17.
         if (g_GameSubState > 10 && g_GameSubState < 0x11 && pkt[4] == 8)
             FUN_004fa5c0(g_GameSubState, 0x24, 0, 1);  // map zone transition
 
