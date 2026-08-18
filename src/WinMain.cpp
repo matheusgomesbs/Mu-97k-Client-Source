@@ -66,6 +66,16 @@ int  Config_Load(void);  // see Config/Config_Load.cpp
 //   window style: WS_POPUP (0x80000000)
 //   Dimensions: DAT_0056156c × DAT_00561570 (de ChangeDisplaySettings)
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// DESVIACION (documentada): el original crea la ventana con WS_POPUP y despues
+// enumera modos de video y llama ChangeDisplaySettingsA(mode, 0) (verificado en
+// Ghidra 0x0041eeb9: flag 0, NO CDS_FULLSCREEN) redimensionando el escritorio a
+// la resolucion de la ventana - por eso la ventana sin borde cubria la pantalla.
+// Nuestro port omite el ChangeDisplaySettings (corre en ventana), asi que usamos
+// WS_OVERLAPPEDWINDOW + AdjustWindowRectEx para que la ventana tenga
+// borde/titulo y el AREA CLIENTE siga siendo exactamente la resolucion
+// configurada (DAT_0056156c/570). El render no depende del tamano de la
+// ventana (usa las constantes), asi que no hay que tocar nada mas.
 static void Window_Create(HINSTANCE hInst)
 {
     WNDCLASSA wc     = {};
@@ -80,12 +90,22 @@ static void Window_Create(HINSTANCE hInst)
 
     // DAT_0056156c / DAT_00561570 los setean EnumDisplaySettings + ChangeDisplaySettingsA
     // (declarados en globals.h como DWORD)
+    DWORD dwStyle = WS_OVERLAPPEDWINDOW;            // DESVIACION: el original usa WS_POPUP
+    RECT rc       = { 0, 0, (LONG)DAT_0056156c, (LONG)DAT_00561570 };
+    AdjustWindowRectEx(&rc, dwStyle, FALSE, 0x40008);
+
+    // Centrada en pantalla (el original usa 0,0; con titulo quedaria fuera).
+    int x = (GetSystemMetrics(SM_CXSCREEN) - (rc.right - rc.left)) / 2;
+    int y = (GetSystemMetrics(SM_CYSCREEN) - (rc.bottom - rc.top)) / 2;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+
     g_hWnd = CreateWindowExA(
         0x40008,                         // WS_EX_APPWINDOW|WS_EX_TOPMOST
         "Dialog",
         "Mu Online",
-        WS_POPUP,
-        0, 0, DAT_0056156c, DAT_00561570,
+        dwStyle,
+        x, y, rc.right - rc.left, rc.bottom - rc.top,
         NULL, NULL, hInst, NULL
     );
     // g_hWnd → DAT_055c9ffc
