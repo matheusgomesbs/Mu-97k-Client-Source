@@ -279,9 +279,9 @@ void __cdecl UIChatLogWindow_AddText(const char* label, const char* msg, int mod
         DWORD* obj = (DWORD*)DAT_055c9ff0;
         void** vt = (void**)*obj;
         if (vt) {
-            typedef void (__fastcall *FnAddText)(DWORD*, int /*edx*/,
-                                                 const char*, const char*,
-                                                 int, int);
+            typedef void(__fastcall* FnAddText)(DWORD*, int /*edx*/,
+                const char*, const char*,
+                int, int);
             ((FnAddText)vt[28])(obj, 0, label, msg, mode, 0);
         }
     }
@@ -302,7 +302,7 @@ void __cdecl UIChatLogWindow_AddText(const char* label, const char* msg, int mod
 
     // ── 3. Append to player-chat ring buffer ───────────────────────────────────
     int   count = DAT_07e11da4;
-    char* base  = DAT_07df9380;
+    char* base = DAT_07df9380;
     if (count >= 0x77) {
         // Ring full: shift all entries one slot forward, losing the oldest (slot 0)
         memmove(base, base + 0x118, (0x77 - 1) * 0x118);
@@ -310,8 +310,9 @@ void __cdecl UIChatLogWindow_AddText(const char* label, const char* msg, int mod
     }
     char* slot = base + count * 0x118;
     memset(slot, 0, 0x118);
-    lstrcpynA(slot,        (LPCSTR)label, 0xB);    // sender name: max 11 chars
-    lstrcpynA(slot + 0x0B, (LPCSTR)msg,   0x101);  // message:     max 257 chars
+    strncpy_s(slot, 0x118, label, 0xB); // sender name: max 11 chars
+    strncpy_s(slot + 0x0B, 0x118 - 0x0B, msg, 0x101); // message: max 257 chars (a partir do offset 0x0B)
+
     *(int*)(slot + 0x10C) = mode;                  // channel / type dword
     DAT_07e11da4 = count + 1;
 
