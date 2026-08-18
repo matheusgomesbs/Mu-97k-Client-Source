@@ -842,6 +842,67 @@ void __cdecl FUN_0049cbf0(void *entity_v)
         }
     }
 
+    // 8c) Despacho por clase sobre el arma equipada (IDA Attack 0x0049D060..0x0049D1D0).
+    // Bloque que faltaba entero en el port.  Va exactamente acá: después del gate de
+    // estado de animación y **antes** del chequeo de maná, porque en el binario es el
+    // camino que resuelve el ataque de arma (SkillWarrior / SkillElf) sin pasar por el
+    // dispatch de skills de más abajo.
+    //
+    // Gate: `c->Class & 7` (+444) distinto de 0 — o sea, todo menos Dark Wizard.
+    //   CheckTarget(c); si CheckWall(PositionX, PositionY, TargetX, TargetY) da libre,
+    //   recorre las dos manos de CharacterMachine y prueba, en este orden:
+    //     Class&7 == 1 ó 3 (DK)  → FUN_00483b30 (SkillWarrior) @ 0x00483B30
+    //     Class&7 == 2     (Elf) → SkillElf                    @ 0x0048BD70
+    //   El primero que devuelva !=0 corta Attack (LAB_0049d93f = salida).
+    //
+    // El ITEM de cada mano es `CharacterMachine + 0x218 + i*0x44`, con i = 0 y 0x44.
+    // Confirmado en el `LEA EAX,[EDI + EDX*0x1 + 0x218]` de 0x0049D0B7 (SkillWarrior)
+    // y 0x0049D189 (SkillElf), con EDX = DAT_07cf1ffc.  El loop del original es
+    // `for (i = 0; i < 0x45; i += 0x44)`, o sea exactamente dos vueltas.
+    //
+    // Montado (Helper.Type en +696 == 0x332 / 0x333) el DK sólo pasa por SkillWarrior
+    // si el skill equipado es 0x2B / 0x2F / 0x31 (43 / 47 / 49); con cualquier otro
+    // salta directo al chequeo de Elf (LAB_0049d10d).
+    //
+    // FUN_00483b30 está portada en src/Item/Item_Equip.cpp, junto con FUN_00483780
+    // (UseSkillWithRangeCheck), que es a donde deriva.  El nombre del archivo viene del
+    // rótulo viejo y equivocado de 0x00483B30; se conserva a propósito.
+    // Interruptor temporal de bisección (2026-08-17): poner en 0 deja Attack como
+    // estaba antes de este bloque, para aislar la desconexión al atacar/moverse.
+    {
+        const BYTE classBits = (BYTE)entity[444] & 7;
+        if (classBits != 0) {
+            CheckTarget_stub((DWORD)entity);
+            const int posX = *(int*)(entity + 904);
+            const int posY = *(int*)(entity + 908);
+            if (FUN_004830b0(posX, posY, (int)DAT_07e016c0, (int)DAT_07e016c4)) {
+                for (int slotOff = 0; slotOff < 0x45; slotOff += 0x44) {
+                    DWORD pItem = (DWORD)((char*)DAT_07cf1ffc + 0x218 + slotOff);
+                    if (classBits == 1 || classBits == 3) {
+                        bool bAllowed = true;
+                        const short helperType = *(short*)(entity + 696);
+                        if (helperType == 0x332 || helperType == 0x333) {
+                            // El original re-lee el byte del skill desde CharacterAttribute
+                            // en vez de reusar el valor cacheado; es el mismo dato que iType.
+                            bAllowed = (iType == 0x2B || iType == 0x2F || iType == 0x31);
+                        }
+                        if (bAllowed) {
+                            DAT_07d78098 = 1;
+                            DAT_07d7809c = (Hero ? *(unsigned char*)(Hero + 913) : 0);
+                            DAT_07d780a0 = (DWORD)DAT_00559c50;
+                            if (FUN_00483b30((DWORD)entity, pItem))
+                                return;
+                        }
+                    }
+                    if (classBits == 2) {
+                        if (SkillElf_stub((DWORD)entity, pItem))
+                            return;
+                    }
+                }
+            }
+        }
+    }
+
     // 9) iType 0 (no skill equipped) — fall through to basic attack path ──────────────────
     // Basic attack (no skill) is sent from Action() @ 0x48D640 / Player_InputTick
     // ya (opcode 0x15 desde Player_InputTick.cpp:594). Acá no hay nada que hacer.
@@ -870,7 +931,9 @@ void __cdecl FUN_0049cbf0(void *entity_v)
         // Block on warehouse/trade open
         if (WarehouseOpened || TradeOpened) {
             // GlobalText[474] = "No puedes hacer esto ahora."
-            UIChatLogWindow_AddText("ERROR", GlobalText[474], 2);
+            // IDA: AddText(&DAT_07e11e34, GlobalText[0x1DA], 2) — el 1er argumento es el
+            // buffer de ID de canal del chat, no una cadena literal.
+            UIChatLogWindow_AddText(&DAT_07e11e34, GlobalText[474], 2);
             return;
         }
         if (EnableUse > 0) return;
@@ -951,6 +1014,7 @@ void __cdecl FUN_0049cbf0(void *entity_v)
             return;
         Combat_AimAtCheckedTarget97k(entity, bHasTarget);
         const BYTE direction = (BYTE)(int)(*(float*)(entity + 36) * (256.0f / 360.0f));
+        // 90/89 confirmados: colas 0x004A7835 (PUSH 0x5A) y 0x004A83EE (PUSH 0x59).
         Combat_SendDurationSkill97k(entity, iType, (iType == 10) ? 90 : 89,
                                     direction, 0, 0, 0xFFFF);
         Combat_SendAreaHits97k(entity, iType);
@@ -1130,6 +1194,7 @@ void __cdecl FUN_0049cbf0(void *entity_v)
                 targetKey = *(unsigned short*)(CharactersClient + 916 * (int)DAT_00559c50 + 476);
             }
             const BYTE direction = (BYTE)(int)(*(float*)(entity + 36) * (256.0f / 360.0f));
+            // 90/89 confirmados: colas 0x004A7835 (PUSH 0x5A) y 0x004A83EE (PUSH 0x59).
             Combat_SendDurationSkill97k(entity, iType, (iType == 10) ? 90 : 89,
                                         direction, 0, 0, targetKey);
             return;
@@ -1137,6 +1202,72 @@ void __cdecl FUN_0049cbf0(void *entity_v)
         // 97k real no deja el resto de los skills bajos caer por un 0x19 genérico.
         // Si no matcheó alguno de los helpers/runtime paths explícitos, se corta acá.
         return;
+    }
+
+    // 13b) iType == 52 con arco — rama dedicada (IDA Attack 0x0049D9DD..0x0049E6FE).
+    // Faltaba entera: el port mandaba el 52 por el camino genérico de abajo.
+    //
+    // Gate, leído del assembly (más limpio que el decompile):
+    //     0x0049D9E4  CMP word ptr [ECX+0x2], 0x186   ; sólo el héroe
+    //     0x0049D9FC  Hero->Weapon[0].Type (Hero+0x270) en [0x218, 0x21E]   -> pasa
+    //     0x0049DA11  Hero->Weapon[1].Type (Hero+0x288) en [0x210, 0x216]   -> pasa
+    //     0x0049DA1D  Hero->Weapon[1].Type == 0x221                         -> pasa
+    //     0x0049DA23  Hero->Weapon[0].Type en [0x220, 0x222]                -> pasa
+    //     0x0049DA39  CALL 0x0048BA70                 ; CheckArrow()
+    // Si el gate falla, el original **no corta**: sigue al camino genérico.
+    //
+    // Adentro: distancia contra SkillAttribute[52] (+0x26, leído en 0x0049DAAC como
+    // `[ECX + 0x846]`, y 0x846 = 52*0x28 + 0x26), y si entra:
+    //     CreateAngle hacia c+788/c+792, CurrentSkill = 52, paquete 0x1E con skill 0x34,
+    //     y SetPlayerAttack (0x00444410, llamado en 0x0049E61B).
+    //
+    // ⚠ BUG DEL ORIGINAL, preservado: después de SetPlayerAttack, en 0x0049E623 hay
+    //   CMP word ptr [EDI+0x2], 0x186 / JZ 0x0049E6C1
+    // o sea, el bloque que llama CreateArrows() sólo corre si la entidad **no** es el
+    // héroe (0x186) — pero el gate de arriba ya exigió que lo sea.  CreateArrows() es
+    // inalcanzable por este camino.  No lo "arreglamos": se documenta y se deja.
+    //
+    // ⚠ Tampoco hay `return`: en IDA esta rama cae al camino genérico de abajo, que
+    // puede volver a mandar.  Se reproduce igual.  Vale probarlo en juego.
+    if (iType == 52 && *(short*)(entity + 2) == 390) {
+        const short weaponRight = Hero ? *(short*)(Hero + 0x270) : (short)-1;
+        const short weaponLeft  = Hero ? *(short*)(Hero + 0x288) : (short)-1;
+        const bool bBowEquipped =
+               (weaponRight >= 0x218 && weaponRight <= 0x21E)
+            || (weaponLeft  >= 0x210 && weaponLeft  <= 0x216)
+            || (weaponLeft  == 0x221)
+            || (weaponRight >= 0x220 && weaponRight <= 0x222);
+
+        if (bBowEquipped && FUN_0048ba70() != 0) {
+            const float dx = *(float*)(entity + 16)
+                           - ((float)(int)DAT_07e016c0 * 100.0f + 50.0f);
+            const float dy = *(float*)(entity + 20)
+                           - ((float)(int)DAT_07e016c4 * 100.0f + 50.0f);
+            const float maxDistance = (float)Combat_GetSkillRange97k(52) * 100.0f;
+            if (dx * dx + dy * dy <= maxDistance * maxDistance) {
+                *(float*)(entity + 36) = FUN_0043e050(
+                    *(float*)(entity + 16), *(float*)(entity + 20),
+                    *(float*)(entity + 788), *(float*)(entity + 792));
+
+                // Chequeo anti-cheat por nombre (strstr(Hero->ID, DAT_00559E80)) —
+                // salteado: pasa siempre en builds limpios.
+                DAT_05826d10 = 52;   // CurrentSkill
+
+                const BYTE direction =
+                    (BYTE)((int)(*(float*)(entity + 36) * (256.0f / 360.0f)));
+                WORD targetKey = 0xFFFF;
+                if (DAT_00559c50 != -1 && FUN_00483160() != 0) {
+                    targetKey = *(unsigned short*)(
+                        CharactersClient + 916 * (int)DAT_00559c50 + 476);
+                }
+                // action = -2: el original cierra con SetPlayerAttack (0x00444410), que
+                // no es ninguna de las dos colas que arma Combat_SendDurationSkill97k.
+                // Se manda el paquete y se hace la cola acá.
+                Combat_SendDurationSkill97k(entity, 52, -2, direction, 0, 0, targetKey);
+                FUN_00444410((int)(intptr_t)entity, 0, 0, 0);   // SetPlayerAttack
+            }
+        }
+        // Sin `return`: cae al camino genérico, igual que el original.
     }
 
     // 14) iType == 52 (Twister/Cyclone) — packet 0x1E ──────────────────────────────────────────────────────────────────────────
@@ -1176,7 +1307,20 @@ void __cdecl FUN_0049cbf0(void *entity_v)
     // 15) iType == 16 (Mana Shield on a party member) — packet 0x19
     if (iType == 16 && DAT_00559c50 != -1) {
         char* partyTarget = (char*)(uintptr_t)CharactersClient + 916 * (int)DAT_00559c50;
-        if (*(unsigned char*)(partyTarget + 132) != 1 || PartyNumber <= 0) {
+        // Case 0x10, entrada 0x004A59CF, verificado instruccion a instruccion 2026-08-17:
+        //   004A59CF  EAX = SelectedCharacter [0x00559C50]; si == -1 -> 0x004A64C1
+        //   004A59DD..004A59EE  ESI = CharactersClient[0x07ABF5D0] + 916*EAX
+        //   004A59F1  AL = [ESI + 0x84]           ; Kind
+        //   004A59F8  CMP AL,1 / JZ 0x004A5A0B
+        //   004A59FC  MOV dword ptr [0x00559C58], 0xFFFFFFFF   ; Attacking = -1
+        //   004A5A06  JMP 0x004AC090              ; epilogo = return
+        // ⚠ El port escribia `DAT_07e11984` (Up-arrow debounce) en vez de `Attacking`.
+        // `Attacking` es DAT_00559c58.  Corregido.
+        if (*(unsigned char*)(partyTarget + 132) != 1) {
+            DAT_00559c58 = -1;
+            return;
+        }
+        if (PartyNumber <= 0) {
             return;
         }
         const char* targetName = partyTarget + 449;
@@ -1223,15 +1367,23 @@ void __cdecl FUN_0049cbf0(void *entity_v)
     if (iType == 48) {
         DWORD now = GetTickCount();
         if ((DWORD)(now - g_dwLatestMagicTick_Attack) > 300) {
-            unsigned short heroKey = *(unsigned short*)(entity + 476);
-            if (heroKey != 0xFFFF) {
-                g_dwLatestMagicTick_Attack = now;
-                DAT_05826d10 = (DWORD)iType;
-                BYTE pkt[6] = { 0xC1, 6, 0x19, (BYTE)iType,
-                                (BYTE)(heroKey >> 8), (BYTE)heroKey };
-                Net_SendSmallPacket(pkt, sizeof(pkt));
-            }
+            // 2026-08-17: la clave del paquete 0x19 sale de **DAT_05826cac**, no de
+            // `c->Key` (+0x1DC).  En 0x0049E9C1 y 0x0049F437:
+            //     MOV EDX, dword ptr [0x05826cac]
+            //     MOV EAX, EDX / SAR EAX, 0x8        ; byte alto
+            // DAT_05826cac lo escribe ReceiveJoinServer (0x00424059) — es el HeroKey
+            // que da el servidor, y Net_Process.cpp:1322 ya lo puebla en este port.
+            // Tampoco hay chequeo de 0xFFFF en el original: era invención nuestra.
+            const unsigned short heroKey = (unsigned short)DAT_05826cac;
+            g_dwLatestMagicTick_Attack = now;
+            DAT_05826d10 = (DWORD)iType;
+            BYTE pkt[6] = { 0xC1, 6, 0x19, (BYTE)iType,
+                            (BYTE)(heroKey >> 8), (BYTE)heroKey };
+            Net_SendSmallPacket(pkt, sizeof(pkt));
         }
+        // 63 confirmado: cola 0x004A3E17 (PUSH 0x3F), fin del case 48 que entra por
+        // 0x004A3032 en la jump table de 0x0049FA1C.  Igual que la del 62, esta cola
+        // **no** llama a 0x00443E70 antes del SetAction — por eso acá va directo.
         FUN_0043e820((int)(intptr_t)entity, 63);
         entity[748] = 0;
         return;
@@ -1308,6 +1460,8 @@ void __cdecl FUN_0049cbf0(void *entity_v)
         if (DAT_00559c50 != -1 && FUN_00483160() != 0) {
             targetKey = *(unsigned short*)(CharactersClient + 916 * (int)DAT_00559c50 + 476);
         }
+        // 81 confirmado: cola 0x004A301B (PUSH 0x51), fin del case 56 que entra por
+        // 0x004A1D94 en la jump table de 0x0049FA1C.
         Combat_SendDurationSkill97k(entity, iType, 81, direction, destination, angle, targetKey);
         return;
     }
@@ -1421,21 +1575,31 @@ void __cdecl FUN_0049cbf0(void *entity_v)
     // Attack.c deja este rango fuera de la rama de seguir-al-objetivo; el
     // CGSkillAttackRecv de MuEmu después rutea el C3:19 resultante a SkillSummon.
     if (iType >= 30 && iType <= 36) {
+        // 0x0049E792  CMP dword ptr [0x0055A7AC], 0xA
+        // 0x0049E799  JZ  0x004AC090            ; epilogo = return
+        // World (0x0055A7AC) es el **indice de mapa**, no un sub-estado; ver globals.h.
+        // Las invocaciones estan bloqueadas en ese mapa.  Verificado 2026-08-17.
+        if ((int)g_GameSubState == 10) {
+            return;
+        }
         const DWORD now = GetTickCount();
         if ((DWORD)(now - g_dwLatestMagicTick_Attack) <= 300) {
             return;
         }
-        const WORD heroKey = *(WORD*)(entity + 476);
-        if (heroKey == 0xFFFF) {
-            return;
-        }
+        // Misma corrección que en el case 48: la clave sale de DAT_05826cac
+        // (0x0049E9C1 / 0x0049F437), y el original no chequea 0xFFFF.
+        const WORD heroKey = (WORD)DAT_05826cac;
         g_dwLatestMagicTick_Attack = now;
         DAT_05826d10 = (DWORD)iType;
         BYTE pkt[6] = { 0xC1, 6, 0x19, (BYTE)iType,
                         (BYTE)(heroKey >> 8), (BYTE)heroKey };
         Net_SendSmallPacket(pkt, sizeof(pkt));
+        // La cola de los summons es 0x0049EEBE: PUSH entity / CALL 0x00444A80 /
+        // JMP 0x004AC08D (epilogo).  **No** limpia [entity+0x2EC].  Ninguna de las
+        // colas de SetPlayerMagic del complejo lo hace (0x0049EEBE, 0x004A6C44,
+        // 0x004A93A0, 0x004AAAF9); solo las de SetAction.  El `entity[748] = 0`
+        // que habia aca era invencion nuestra.
         FUN_00444a80((int)(intptr_t)entity);
-        entity[748] = 0;
         return;
     }
 
@@ -1446,6 +1610,41 @@ void __cdecl FUN_0049cbf0(void *entity_v)
         *(float *)(entity + 36) = FUN_0043e050(
             *(float *)(entity + 16), *(float *)(entity + 20),
             *(float *)(entity + 788), *(float *)(entity + 792));
+
+        // Los dos cases son asimétricos en IDA: el 0x29 (41) manda sin chequear
+        // distancia, y el 0x2A (42) tiene un gate propio (L2031-2036) que, fuera de
+        // alcance, escribe `Attacking = -1` y no manda nada.  Faltaba en el port.
+        if (iType == 42) {
+            const float dx = *(float*)(entity + 16)
+                           - ((float)(int)DAT_07e016c0 * 100.0f + 50.0f);
+            const float dy = *(float*)(entity + 20)
+                           - ((float)(int)DAT_07e016c4 * 100.0f + 50.0f);
+            const float maxDistance = (float)Combat_GetSkillRange97k(iType) * 100.0f;
+            // Case 0x2A, gate verificado 2026-08-17 (0x004A4500..0x004A456A):
+            //   range = SkillAttribute[skill] + 0x26   (via [EDX + skill*0x28 + 0x26])
+            //   dx = c->PositionX(+0x10) - (TargetX*100.0f + 50.0f)   [0x005524F0]=100, [0x00552598]=50
+            //   dy = c->PositionY(+0x14) - (TargetY*100.0f + 50.0f)
+            //   FSQRT; si !(dist <= range*100)  ->  0x004A50C6
+            //   004A50C6  MOV dword ptr [0x00559C58], 0xFFFFFFFF   ; Attacking = -1
+            // ⚠ El port escribia `DAT_07e11984` (Up-arrow debounce) en vez de `Attacking`
+            // (DAT_00559c58).  Corregido.
+            // 0x004A50D0 desensamblado 2026-08-17.  El original no retorna aca: 0x004A50C6
+            // cae en esa cola comun, que empieza con anti-tamper (0x004A50D0..0x004A511E,
+            // MAIN_HASH_CLASS 0x055C9BC8) y despues hace un **gate de clase**:
+            //   004A511F  EDI = CharacterMachine [0x07CF1FFC]
+            //   004A5126  AL = [EDI + 0x1BC] & 7        ; clase (ver trampa 5 del CLAUDE.md)
+            //   004A512E  JZ  0x004A5138                ; clase 0 = Dark Wizard -> sigue
+            //   004A5130  CMP AL,3 / JNZ 0x004AC090     ; clase 3 = MG sigue; el resto RETORNA
+            // El skill 42 (Rageful Blow) es de Dark Knight (clase 1), asi que en la practica
+            // el original tambien retorna: el `return` de abajo es correcto para DK.
+            // ⚠ Queda una divergencia residual para **Magic Gladiator** (clase 3), que en el
+            // original seguiria hacia 0x004A5138 en vez de cortar.  Sin portar.
+            if (maxDistance * maxDistance < dx * dx + dy * dy) {
+                DAT_00559c58 = -1;
+                return;
+            }
+        }
+
         const BYTE direction = (BYTE)((int)(*(float*)(entity + 36) * (256.0f / 360.0f)));
         WORD targetKey = 0xFFFF;
         if (DAT_00559c50 != -1 && FUN_00483160() != 0) {
@@ -1458,14 +1657,9 @@ void __cdecl FUN_0049cbf0(void *entity_v)
         return;
     }
 
-    // IDA Attack.c cases 41/42 (L2938/L3537): ambos rotan siempre hacia la
-    // posición cacheada del objetivo en c+788/c+792. Movement_Tick en este
-    // call site es CreateAngle (FUN_0043e050); no hay gate de clase en IDA.
-    if (iType == 41 || iType == 42) {
-        *(float *)(entity + 36) = FUN_0043e050(
-            *(float *)(entity + 16), *(float *)(entity + 20),
-            *(float *)(entity + 788), *(float *)(entity + 792));
-    }
+    // 2026-08-17: acá había una segunda copia del bloque 41/42, inalcanzable — la rama
+    // de arriba siempre hace `return`.  Eliminada (armadilha 1 del CLAUDE.md: código
+    // muerto que parece lógica viva al auditar).
 
     // 18) Remaining high/runtime skills — wizard helper path.
     Combat_SeedRuntimeState97k(iType, (int)DAT_00559c50);
@@ -1613,22 +1807,50 @@ static BYTE Combat_ResolveQueuedSkillId97k()
     return charAttr[*(BYTE*)(Hero + 913) + 87];
 }
 
+// Alcance del skill.  2026-08-17: corregido contra el binario — antes leía **+0x27** de
+// **SkillAttribute2**, y las dos cosas estaban mal.
+//
+// Quién escribe la tabla: OpenSkillScript @ 0x0047AC50.  Lee un blob de 0xA00 bytes
+// (= 64 entradas × 0x28), lo desencripta con BuxConvert_0(buf, 0x28) por entrada y lo
+// copia a **dos** tablas:
+//     SkillAttribute  @ 0x07D29D20  (DAT_07d29d20) — copia cruda
+//     SkillAttribute2 @ 0x07CF1FF8  (DAT_07cf1ff8) — igual, pero con
+//                                    `tabla[i*0x28 + 0x26] <<= 1` al final del loop
+// O sea: **no son intercambiables**, el byte del alcance está duplicado en la segunda.
+//
+// Quién lee el alcance: UseSkillWithRangeCheck @ 0x00483780, en 0x004838E5:
+//     MOV EAX, [0x07D29D20]
+//     MOV DL,  byte ptr [EDI + EAX*0x1 + 0x26]      ; EDI = skill * 0x28
+// Attack hace lo mismo (`SkillAttribute[i].TypeSkill`, que con stride 40 es i*0x28+0x26).
+//
+// Conclusión: **SkillAttribute (0x07D29D20), offset +0x26, stride 0x28, 64 entradas.**
+// ⚠ DESVÍO (2026-08-17): en **este port** la tabla cruda `SkillAttribute` (0x07D29D20)
+// queda vacía.  WinMain.cpp:807 la aloca y la pone a cero, el parser de texto
+// FUN_0047a5b0 (Item/Skill_Data.cpp:36) todavía es un stub, y el cargador del
+// `Skill.bmd` — FUN_0047ac50, Item/Skill_Data.cpp:118 — sólo escribe la copia
+// `SkillAttribute2` (0x07CF1FF8), con el `+0x26` ya duplicado (`<<= 1`).
+// Leer sólo 0x07D29D20 devolvía 0 para todos los skills: nada entraba nunca en
+// alcance y Attack cortaba sin mandar paquete (ningún skill funcionaba).
+// Mientras el cargador no llene la tabla cruda, se cae a la copia deshaciendo el
+// shift.  El orden de preferencia mantiene la lectura fiel cuando la tabla exista.
 static int Combat_GetSkillRange97k(int skillType)
 {
+    // 0x004A44FF..0x004A450A, el sitio del case 42:
+    //     MOV EDX, dword ptr [0x07D29D20]      ; SkillAttribute
+    //     XOR ECX, ECX
+    //     LEA EAX, [EAX + EAX*0x4]             ; skill*5
+    //     MOV CL, byte ptr [EDX + EAX*0x8 + 0x26]   ; +(skill*0x28)+0x26
+    // Lectura directa, sin chequear cero y sin mirar SkillAttribute2.  El
+    // fallback en cascada que habia aca (SkillAttribute2 >> 1 cuando el byte
+    // daba 0) era invencion nuestra: el original no lo tiene.  Removido
+    // 2026-08-18, igual que el `return 4` de antes.
     if (skillType < 0 || skillType >= 64)
-        return 4;
+        return 0;
 
-    BYTE* rec = nullptr;
-    if (DAT_07cf1ff8 != 0)
-        rec = (BYTE*)(uintptr_t)DAT_07cf1ff8 + skillType * 0x28;
-    else if (DAT_07d29d20 != 0)
-        rec = (BYTE*)(uintptr_t)DAT_07d29d20 + skillType * 0x28;
+    if (DAT_07d29d20 == 0)
+        return 0;
 
-    if (!rec)
-        return 4;
-
-    int range = (int)rec[0x27];
-    return (range > 0) ? range : 4;
+    return (int)((BYTE*)(uintptr_t)DAT_07d29d20)[skillType * 0x28 + 0x26];
 }
 
 static void Combat_SeedRuntimeState97k(int skillType, int targetIdx)
@@ -1664,9 +1886,31 @@ static void Combat_SendDurationSkill97k(char* entity, int skillType, int action,
                                         BYTE angle, WORD targetKey,
                                         int packetX, int packetY)
 {
-    // MuEmu: PMSG_DURATION_SKILL_ATTACK_RECV { C3:1E, skill, x, y,
-    // dir, dis, angle, index[2] }.  -1 is the protocol's ground/no-target
-    // centinela, tal como lo usa CPatchs::SendRequestMagicContinue.
+    // ⚠ DESVÍO DELIBERADO — el formato nativo es de **9 bytes**, acá se mandan 11.
+    //
+    // Lo que hace el binario 0.97k:
+    //     C1 09 1E <skill> <x> <y> <dir> <dis> <angle>
+    // Los dos sitios que arman este paquete montan exactamente 9 bytes, contando los
+    // LEA de append sobre cada buffer:
+    //     Attack @ 0x0049DC00-0x0049E300   (buffer [ESP+0x24B2], skill 0x34 fijo)
+    //     ProcessHeroActionCommand @ 0x004A45E8-0x004A4D63 ([ESP+0xC82], genérico)
+    // y en el genérico los tres últimos son `XOR CL,CL` (0x004A4A3C / 0x004A4B4E /
+    // 0x004A4C60).  No hay campo de objetivo: los skills de duración nativos se
+    // resuelven del lado del server por área/dirección.
+    //
+    // El `index[2]` sale de PMSG_DURATION_SKILL_ATTACK_SEND (Protocol.h:351) de la DLL
+    // de inyección de Kayito, y esa DLL **parchea** el cliente: CPatchs::
+    // SendRequestMagicContinue (Patchs.cpp:1936) se engancha con Pushad/Jmp[jmpBack] y
+    // reemplaza el armado original justamente para agregar el objetivo.
+    //
+    // **Por qué lo conservamos:** el MuEmu contra el que corre este port espera el
+    // formato parcheado de 11 bytes.  Mandar los 9 nativos rompería los skills 5, 8, 9,
+    // 10, 12, 14, 41, 42, 55 y 56.  Decisión del usuario, 2026-08-17.  Registrado en
+    // DESCOBERTAS.md, tabla "Desvios deliberados".
+    //
+    // Semántica de los campos, según el hook de la DLL:
+    //     x = (int)(c[788] / 100.0f), y = (int)(c[792] / 100.0f)  — posición cacheada
+    //     del objetivo, en grid;  dir = (int)(c[0x24] / 360.0f * 256.0f)
     BYTE pkt[11];
     pkt[0] = 0xC1;
     pkt[1] = 11;
@@ -1681,10 +1925,50 @@ static void Combat_SendDurationSkill97k(char* entity, int skillType, int action,
     pkt[10] = (BYTE)targetKey;
     Net_SendSmallPacket(pkt, sizeof(pkt));
 
-    if (action < 0) {
-        FUN_00444a80((int)(intptr_t)entity); // Attack.c LABEL_1430
+    // Colas de animación.  2026-08-17 (segunda pasada): las tres jump tables del
+    // complejo de Attack fueron decodificadas y cada case quedó mapeado a su cola.
+    // El barrido anterior había perdido tres `CALL 0x0043E820` porque Ghidra no tenía
+    // esas regiones desensambladas — de ahí la sospecha (falsa) de que 81/89/90 eran
+    // invención nuestra.  **Los tres son reales.**
+    //
+    // Tablas de salto:
+    //   0x0049FA1C  switch #1  índice = skill-0x29, tabla de bytes en 0x004AC0C4
+    //   0x004A59C8  switch #2  índice = skill-0x0A, tabla de bytes en 0x004AC0E8
+    //   0x004A87F6  switch #3  índice = skill-0x05, tabla directa en 0x004AC118
+    //
+    // Mapa completo case → cola:
+    //   skill 41  entry 0x0049FA23  cola 0x004A0B01  PUSH 0x3D (61)
+    //   skill 55  entry 0x004A0B18  cola 0x004A1D7D  PUSH 0x3D (61)
+    //   skill 56  entry 0x004A1D94  cola 0x004A301B  PUSH 0x51 (81)
+    //   skill 48  entry 0x004A3032  cola 0x004A3E17  PUSH 0x3F (63)
+    //   skill 42  entry 0x004A3E2E  cola 0x004A50AB  PUSH 0x3E (62)   (SIN 0x00443E70)
+    //   skill 16  entry 0x004A59CF  cola 0x004A6C44  SetPlayerMagic
+    //   skill 10  entry 0x004A6CD4  cola 0x004A7835  PUSH 0x5A (90)
+    //   skill 14  entry 0x004A784C  cola 0x004A83EE  PUSH 0x59 (89)
+    //   skills 8,9 entry 0x004A87FD cola 0x004A93A0  SetPlayerMagic
+    //   skill 12  entry 0x004A93AB  cola 0x004A9FB3  PUSH 0x58 (88) + [0x07E11DB8]=0
+    //   skill 5   entry 0x004A9FD4  cola 0x004AAAF9  SetPlayerMagic
+    //   summons 30..36              cola 0x0049EEBE  SetPlayerMagic
+    //   skill 52 (arco)             cola 0x0049E61B  SetPlayerAttack
+    //
+    // Todas las colas de SetAction hacen `[entity+0x2EC] = 0` después.  Llaman a
+    // 0x00443E70 antes las de 61 (0x004A0AF5 / 0x004A1D71), 81 (0x004A300F),
+    // 89 (0x004A83E2), 90 (0x004A7829) y 88 (0x004A9FA7).  **No** lo llaman las de
+    // 62 (0x004A50AB) ni 63 (0x004A3E17).
+    //
+    // Skills 18..23 (0x12..0x17), en el switch #2, saltan a 0x004AC090 — que es el
+    // epílogo de la función.  O sea: no hacen nada.  El port ya retorna para ellos.
+    if (action == -2) {
+        // Sin cola: el llamador la hace.  Lo usa la rama de arco del skill 52, que
+        // cierra con SetPlayerAttack (0x00444410) en vez de SetPlayerMagic o SetAction.
+    } else if (action < 0) {
+        FUN_00444a80((int)(intptr_t)entity); // SetPlayerMagic
     } else {
-        FUN_00443e70();
+        // El sitio del 62 (0x004A50AB) es el único de los tres que **no** llama a
+        // 0x00443E70 antes del SetAction.
+        if (action != 62) {
+            FUN_00443e70();
+        }
         FUN_0043e820((int)(intptr_t)entity, action);
         entity[748] = 0;
     }
