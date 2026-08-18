@@ -277,7 +277,14 @@ extern char    s__s_file_not_found__0055a784[];  // "%s file not found" format s
 extern DWORD   DAT_0055a798;
 extern char    DAT_0055a79c[];  // "Data\\"  path prefix
 extern char    DAT_0055a7a4[];  // "Data2\\" path prefix
-extern int     DAT_0055a7ac;   // g_GameSubState: 0=connecting 2=in-world 7=loading-map
+// DAT_0055a7ac es **World**: el indice del mapa actual, no un sub-estado de juego.
+// Lo escriben InitGame (0x004244EB), ReceiveJoinMapServer (0x00426152),
+// ReceiveRevival (0x00426948) y ReceiveTeleport (0x00428BAC) — todos con el mapa
+// destino.  Lo leen el terreno, los monstruos, CheckGate y Attack.  El rotulo viejo
+// ("g_GameSubState: 0=connecting 2=in-world 7=loading-map") era mentira; el alias
+// g_GameSubState se conserva porque ya lo usan ~24 archivos y renombrar ensuciaria
+// el diff para upstream.
+extern int     DAT_0055a7ac;   // World — indice de mapa (alias historico: g_GameSubState)
 extern float  _DAT_0055a7c0;
 extern DWORD   DAT_0055a7c0;
 
@@ -665,7 +672,11 @@ extern DWORD   DAT_07e11e50;   // NPC script chat-log slot 0
 extern DWORD   DAT_07e11e54;   // NPC script chat-log slot 1
 extern DWORD   DAT_07e11e58;   // NPC script chat-log slot 2
 extern DWORD   DAT_07e11e5c;   // NPC script chat-log slot 3
-extern DWORD   DAT_07e11de8;
+// 0x07E11DE4 / 0x07E11DE8 — buffers de ID de canal del chat, de la misma familia que
+// DAT_07e11df4. SkillWarrior (0x00483B30) empuja su **dirección** como 1er argumento de
+// AddText: `PUSH 0x7e11de4` en 0x0048440F y `PUSH 0x7e11de8` en 0x00484C50.
+extern char    DAT_07e11de4;   // string ID del AddText del skill equipado
+extern char    DAT_07e11de8;   // string ID del AddText del camino de skills del arma
 extern DWORD   DAT_07e11e78;   // target entity index (active selection)
 extern DWORD   DAT_07e11e98;   // party HP bars (stride 0x24)
 extern char    DAT_07e11e9c;   // party slot 0 name base (stride 0x24; +0x1c=entity idx, +0x20=pos ptr)
@@ -2319,8 +2330,22 @@ extern unsigned char* TerrainWall;
 
 #endif
 
-// ── SkillAttribute table — 1000 entries × 300 bytes @ 0x07D29D20 ─────────────
-// Each entry: bytes [0-3]=padding, [4+]=skill name (char). Stride 300.
+// ── SkillAttribute — 64 entradas × 0x28 bytes ────────────────────────────────
+// 2026-08-17: la descripción vieja ("1000 entradas × 300 bytes") era incorrecta.
+// OpenSkillScript @ 0x0047AC50 lee un blob de 0xA00 bytes (= 64 × 0x28), lo desencripta
+// con BuxConvert_0(buf, 0x28) por entrada y lo copia a dos tablas:
+//
+//   SkillAttribute  @ 0x07D29D20 (DAT_07d29d20) — copia cruda
+//   SkillAttribute2 @ 0x07CF1FF8 (DAT_07cf1ff8) — idéntica, pero con
+//                                  `tabla[i*0x28 + 0x26] <<= 1`
+//
+// Las dos **no** son intercambiables: el byte del alcance está duplicado en la segunda.
+// Layout de la entrada (SKILL_ATTRIBUTE, 40 bytes):
+//   +0x00 char Name[32] | +0x20 BYTE Level | +0x21 WORD Mana | +0x23 WORD AbilityGuage
+//   +0x25 BYTE Distance | +0x26 BYTE TypeSkill  ← éste es el que se usa como alcance
+//
+// Los dos punteros ya están declarados arriba como DAT_07cf1ff8 / DAT_07d29d20; el
+// código los indexa crudo, sin struct.
 struct _SkillAttrEntry { char Name[300]; };
 extern _SkillAttrEntry SkillAttribute;  // base of table @ 0x07D29D20
 
@@ -2625,6 +2650,8 @@ extern DWORD   DAT_00552cb4;
 
 // ── CheckArrow / CharSelect chat message string globals ──
 extern char    DAT_07e11df4;        // arrow-required error string ID
+// Attack (0x0049CBF0) empuja &DAT_07e11e34 como ID de canal del AddText del mana scroll.
+extern char    DAT_07e11e34;        // mana-scroll blocked error string ID
 extern char    DAT_07e11df8;        // bolt-required error string ID
 extern char    DAT_07d3c348;        // empty chat message string
 

@@ -782,7 +782,8 @@ char     DAT_07e11dc0  = 0;
 DWORD    DAT_07e11dc4  = 0;   // NPC script: dialog-active flag (set 1 when dialog in progress)
 DWORD    DAT_07e11dc8  = 0;   // NPC script: keepalive timer (GetTickCount at last send)
 DWORD    DAT_07e11dcc  = 0;
-DWORD    DAT_07e11de8  = 0;
+char     DAT_07e11de4  = 0;
+char     DAT_07e11de8  = 0;
 DWORD    DAT_07e11e50  = 0;   // NPC script chat-log slot 0
 DWORD    DAT_07e11e54  = 0;   // NPC script chat-log slot 1
 DWORD    DAT_07e11e58  = 0;   // NPC script chat-log slot 2
@@ -2734,6 +2735,7 @@ float  _DAT_00552cb4      = 64.0f;      // terrain tile size
 // CheckArrow chat string globals (runtime-initialized by resource loader)
 char   DAT_07e11df4       = 0;
 char   DAT_07e11df8       = 0;
+char   DAT_07e11e34       = 0;
 char   DAT_07d3c348       = 0;
 
 // Skill selection
